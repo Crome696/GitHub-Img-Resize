@@ -32,10 +32,10 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Lint
-        run: python -m ruff check src tests run.py
+        run: python -m ruff check src tests scripts run.py
 
       - name: Format
-        run: python -m ruff format --check src tests run.py
+        run: python -m ruff format --check src tests scripts run.py
 
       - name: Dependency audit
         run: python -m pip_audit -r requirements.txt
