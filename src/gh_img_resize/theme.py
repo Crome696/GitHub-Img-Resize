@@ -184,7 +184,7 @@ def apply_theme(root: tk.Misc, palette: Palette) -> ttk.Style:
             ("pressed", palette.accent_pressed),
             ("active", palette.accent_hover),
         ],
-        foreground=[("disabled", palette.accent_text)],
+        foreground=[("disabled", palette.text)],
         bordercolor=[
             ("disabled", palette.accent_disabled),
             ("pressed", palette.accent_pressed),
