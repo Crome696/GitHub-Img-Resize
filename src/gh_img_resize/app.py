@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import platform
 import queue
 import threading
 import tkinter as tk
@@ -28,9 +30,11 @@ from gh_img_resize.resizer import (
     ResizeResult,
     resize_to_target,
 )
-from gh_img_resize.theme import apply_theme, detect_system_appearance, palette_for
+from gh_img_resize.theme import DARK, apply_theme
 
 UI_POLL_MS = 50
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
 
 class ImageResizeApp(tk.Tk):
@@ -38,6 +42,9 @@ class ImageResizeApp(tk.Tk):
         super().__init__()
         self.minsize(600, 640)
         self.geometry("640x720")
+        self._icon_image: tk.PhotoImage | None = None
+        self._apply_window_icon()
+        self._apply_dark_titlebar()
         self.source_path: Path | None = None
         self.preview_image: ImageTk.PhotoImage | None = None
         self._busy = False
@@ -51,11 +58,36 @@ class ImageResizeApp(tk.Tk):
         # Worker threads must not touch Tk; they queue callbacks for the UI thread.
         self._ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
         self.language = resolve_language(load_saved_language(), detect_os_language())
-        self.palette = palette_for(detect_system_appearance())
+        self.palette = DARK
         apply_theme(self, self.palette)
         self._build()
         self._apply_strings()
         self.after(UI_POLL_MS, self._drain_ui_queue)
+
+    def _apply_window_icon(self) -> None:
+        icon_path = ASSETS_DIR / "icon.png"
+        try:
+            self._icon_image = tk.PhotoImage(file=str(icon_path))
+        except tk.TclError:
+            return
+        self.iconphoto(True, self._icon_image)
+
+    def _apply_dark_titlebar(self) -> None:
+        """Ask Windows 10/11 for a dark title bar so it matches the dark content."""
+        if platform.system() != "Windows":
+            return
+        try:
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())  # type: ignore[attr-defined]
+            value = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(value),
+                ctypes.sizeof(value),
+            )
+        except (AttributeError, OSError):
+            return
 
     def _post_to_ui(self, callback: Callable[[], None]) -> None:
         self._ui_queue.put(callback)
