@@ -68,6 +68,52 @@ class ResizeToTargetTests(unittest.TestCase):
             self.assertEqual(output.format, "JPEG")
             self.assertEqual(output.size, (32, 32))
 
+    def test_small_png_is_padded_without_reencode(self) -> None:
+        image = Image.new("RGB", (32, 32), (12, 80, 160))
+        source = self._write(image, ".png", format="PNG")
+        self.assertLess(source.stat().st_size, TARGET_BYTES)
+        result = resize_to_target(source)
+        self.assertEqual(len(result.data), TARGET_BYTES)
+        self.assertFalse(result.reencoded)
+        self.assertTrue(result.padded)
+        with Image.open(io.BytesIO(result.data)) as output:
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.size, (32, 32))
+
+    def test_small_webp_is_padded_without_reencode(self) -> None:
+        image = Image.new("RGB", (32, 32), (12, 80, 160))
+        source = self._write(image, ".webp", format="WEBP", quality=80)
+        self.assertLess(source.stat().st_size, TARGET_BYTES)
+        result = resize_to_target(source)
+        self.assertEqual(len(result.data), TARGET_BYTES)
+        self.assertFalse(result.reencoded)
+        self.assertTrue(result.padded)
+        with Image.open(io.BytesIO(result.data)) as output:
+            self.assertEqual(output.format, "WEBP")
+            self.assertEqual(output.size, (32, 32))
+
+    def test_small_gif_is_padded_without_reencode(self) -> None:
+        image = Image.new("RGB", (32, 32), (12, 80, 160))
+        source = self._write(image, ".gif", format="GIF")
+        self.assertLess(source.stat().st_size, TARGET_BYTES)
+        result = resize_to_target(source)
+        self.assertEqual(len(result.data), TARGET_BYTES)
+        self.assertFalse(result.reencoded)
+        self.assertTrue(result.padded)
+        with Image.open(io.BytesIO(result.data)) as output:
+            self.assertEqual(output.format, "GIF")
+            self.assertEqual(output.size, (32, 32))
+
+    def test_large_gif_is_scaled_to_target_size_and_aspect(self) -> None:
+        image = Image.frombytes("RGB", (1200, 1200), os.urandom(1200 * 1200 * 3))
+        source = self._write(image, ".gif", format="GIF")
+        self.assertGreater(source.stat().st_size, TARGET_BYTES)
+        result = resize_to_target(source)
+        self.assertEqual(len(result.data), TARGET_BYTES)
+        self.assertTrue(result.scaled)
+        self.assertLess(result.width, 1200)
+        self.assertEqual(result.width, result.height)
+
 
 if __name__ == "__main__":
     unittest.main()
