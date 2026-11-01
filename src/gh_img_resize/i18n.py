@@ -611,6 +611,11 @@ CATALOGS: dict[str, dict[str, str]] = {
 }
 
 
+_LANGUAGE_BY_PREFIX: dict[str, str] = {
+    code: code for code in ("en", "es", "de", "fr", "it", "ja", "ko")
+}
+
+
 def normalize_language(value: str | None) -> str | None:
     """Return a supported language code, or None if the tag does not match."""
     if not value:
@@ -640,17 +645,7 @@ def normalize_language(value: str | None) -> str | None:
             return "pt-BR"
         return None
 
-    prefix = lower.split("-", maxsplit=1)[0]
-    mapping = {
-        "en": "en",
-        "es": "es",
-        "de": "de",
-        "fr": "fr",
-        "it": "it",
-        "ja": "ja",
-        "ko": "ko",
-    }
-    return mapping.get(prefix)
+    return _LANGUAGE_BY_PREFIX.get(lower.split("-", maxsplit=1)[0])
 
 
 def switcher_codes() -> tuple[str, ...]:
@@ -757,13 +752,12 @@ def _os_locale_tags(environ: dict[str, str] | None = None) -> list[str]:
     env = environ if environ is not None else os.environ
     tags: list[str] = []
     tags.extend(_windows_ui_language_tags())
-    for getter in (locale.getlocale, locale.getdefaultlocale):
-        try:
-            value = getter()[0]
-        except (TypeError, ValueError, locale.Error):
-            value = None
-        if value:
-            tags.append(value)
+    try:
+        value = locale.getlocale()[0]
+    except (TypeError, ValueError, locale.Error):
+        value = None
+    if value:
+        tags.append(value)
     for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
         value = env.get(name)
         if value:

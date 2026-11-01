@@ -81,7 +81,7 @@ def detect_system_appearance() -> Appearance:
 def apply_theme(root: tk.Misc, palette: Palette) -> ttk.Style:
     """Apply a clam ttk theme so light and dark palettes stay consistent across OSes."""
     root.configure(background=palette.background)
-    _configure_fonts(root)
+    heading, body = _configure_fonts()
 
     style = ttk.Style(root)
     try:
@@ -99,14 +99,6 @@ def apply_theme(root: tk.Misc, palette: Palette) -> ttk.Style:
         troughcolor=palette.preview,
         focuscolor=palette.accent,
     )
-    heading = None
-    body = None
-    try:
-        heading = tkfont.nametofont("TkHeadingFont")
-        body = tkfont.nametofont("TkDefaultFont")
-    except tk.TclError:
-        pass
-
     style.configure("Canvas.TFrame", background=palette.background)
     style.configure(
         "Card.TFrame",
@@ -230,14 +222,16 @@ def apply_theme(root: tk.Misc, palette: Palette) -> ttk.Style:
     return style
 
 
-def _configure_fonts(_root: tk.Misc) -> None:
+def _configure_fonts() -> tuple[tkfont.Font | None, tkfont.Font | None]:
+    """Size the named Tk fonts and return (heading, body), or Nones if unavailable."""
     try:
         heading = tkfont.nametofont("TkHeadingFont")
         heading.configure(size=18, weight="bold")
         body = tkfont.nametofont("TkDefaultFont")
         body.configure(size=10)
     except tk.TclError:
-        return
+        return None, None
+    return heading, body
 
 
 def _windows_appearance() -> Appearance:

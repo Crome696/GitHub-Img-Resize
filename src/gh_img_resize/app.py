@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -28,6 +30,8 @@ from gh_img_resize.resizer import (
 )
 from gh_img_resize.theme import apply_theme, detect_system_appearance, palette_for
 
+UI_POLL_MS = 50
+
 
 class ImageResizeApp(tk.Tk):
     def __init__(self) -> None:
@@ -37,17 +41,35 @@ class ImageResizeApp(tk.Tk):
         self.source_path: Path | None = None
         self.preview_image: ImageTk.PhotoImage | None = None
         self._busy = False
-        self._image_meta: tuple[str, int, int] | None = None
+        # (format, width, height, size in bytes) of the selected source image.
+        self._image_meta: tuple[str, int, int, int] | None = None
         self._last_result: ResizeResult | None = None
         self._last_dest: Path | None = None
         self._status_kind = ""
         self._progress_key: str | None = None
         self._error_text = ""
+        # Worker threads must not touch Tk; they queue callbacks for the UI thread.
+        self._ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
         self.language = resolve_language(load_saved_language(), detect_os_language())
         self.palette = palette_for(detect_system_appearance())
         apply_theme(self, self.palette)
         self._build()
         self._apply_strings()
+        self.after(UI_POLL_MS, self._drain_ui_queue)
+
+    def _post_to_ui(self, callback: Callable[[], None]) -> None:
+        self._ui_queue.put(callback)
+
+    def _drain_ui_queue(self) -> None:
+        try:
+            while True:
+                try:
+                    callback = self._ui_queue.get_nowait()
+                except queue.Empty:
+                    break
+                callback()
+        finally:
+            self.after(UI_POLL_MS, self._drain_ui_queue)
 
     def _t(self, key: str, **params: object) -> str:
         return translate(self.language, key, **params)
@@ -162,8 +184,7 @@ class ImageResizeApp(tk.Tk):
             )
             return
         if self.source_path is not None and self._image_meta is not None:
-            fmt, width, height = self._image_meta
-            size = self.source_path.stat().st_size
+            fmt, width, height, size = self._image_meta
             self.info_var.set(
                 self._t(
                     "info.selected",
@@ -224,18 +245,19 @@ class ImageResizeApp(tk.Tk):
                 width, height = image.size
                 fmt = image.format or path.suffix.upper().lstrip(".")
                 preview = image.copy()
+            size = path.stat().st_size
             preview.thumbnail((460, 300))
             if preview.mode not in {"RGB", "RGBA", "L"}:
                 preview = preview.convert("RGB")
             self.preview_image = ImageTk.PhotoImage(preview)
-        except OSError as exc:
+        except (OSError, Image.DecompressionBombError) as exc:
             messagebox.showerror(
                 self._t("error.load_failed_title"), str(exc), parent=self
             )
             return
 
         self.source_path = path
-        self._image_meta = (fmt, width, height)
+        self._image_meta = (fmt, width, height, size)
         self._last_result = None
         self._last_dest = None
         self._status_kind = "ready"
@@ -271,14 +293,14 @@ class ImageResizeApp(tk.Tk):
                 result = resize_to_target(source, progress=self._report_progress)
                 dest_path.write_bytes(result.data)
             except Exception as exc:  # noqa: BLE001 - show any failure in the UI
-                self.after(0, lambda error=exc: self._on_failure(error))
+                self._post_to_ui(lambda error=exc: self._on_failure(error))
                 return
-            self.after(0, lambda: self._on_success(result, dest_path))
+            self._post_to_ui(lambda: self._on_success(result, dest_path))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _report_progress(self, message: str) -> None:
-        self.after(0, lambda: self._on_progress(message))
+        self._post_to_ui(lambda: self._on_progress(message))
 
     def _on_progress(self, key: str) -> None:
         self._status_kind = "progress"

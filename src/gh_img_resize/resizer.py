@@ -82,52 +82,48 @@ def resize_to_target(
         fmt = _normalize_format(src.format, source.suffix)
         original_width, original_height = src.size
         frame = _first_frame(src)
-        image = _prepare_image(frame, fmt)
 
-    if len(original) == target_bytes:
+    def result(
+        data: bytes,
+        width: int,
+        height: int,
+        *,
+        padded: bool = False,
+        scaled: bool = False,
+        reencoded: bool = False,
+    ) -> ResizeResult:
         return ResizeResult(
-            data=original,
+            data=data,
             format=fmt,
-            width=original_width,
-            height=original_height,
+            width=width,
+            height=height,
             original_size=len(original),
             original_width=original_width,
             original_height=original_height,
-            padded=False,
-            scaled=False,
-            reencoded=False,
+            padded=padded,
+            scaled=scaled,
+            reencoded=reencoded,
         )
+
+    if len(original) == target_bytes:
+        return result(original, original_width, original_height)
 
     if len(original) < target_bytes and _can_pad(fmt, len(original), target_bytes):
         _emit(progress, "progress.padding")
         padded = _pad(fmt, original, target_bytes)
-        return ResizeResult(
-            data=padded,
-            format=fmt,
-            width=original_width,
-            height=original_height,
-            original_size=len(original),
-            original_width=original_width,
-            original_height=original_height,
-            padded=True,
-            scaled=False,
-            reencoded=False,
-        )
+        return result(padded, original_width, original_height, padded=True)
 
     _emit(progress, "progress.adjusting")
+    image = _prepare_image(frame, fmt)
     encoded, out_image, scaled = _fit_to_target(image, fmt, target_bytes, progress)
     try:
         padded = _pad(fmt, encoded, target_bytes)
     except _CannotPad as exc:
         raise ResizeError("error.cannot_pad") from exc
-    return ResizeResult(
-        data=padded,
-        format=fmt,
-        width=out_image.width,
-        height=out_image.height,
-        original_size=len(original),
-        original_width=original_width,
-        original_height=original_height,
+    return result(
+        padded,
+        out_image.width,
+        out_image.height,
         padded=len(padded) != len(encoded),
         scaled=scaled,
         reencoded=True,
@@ -231,14 +227,18 @@ def _fit_to_target(
         if found is not None:
             return found, image, False
         _emit(progress, "progress.scaling")
-        data, scaled_image = _search_scale_lossy(image, fmt, target_bytes)
+        data, scaled_image = _search_scale(
+            image, lambda candidate: _search_quality(candidate, fmt, target_bytes)
+        )
         return data, scaled_image, True
 
     found = _try_encode(image, fmt, target_bytes)
     if found is not None:
         return found, image, False
     _emit(progress, "progress.scaling")
-    data, scaled_image = _search_scale_lossless(image, fmt, target_bytes)
+    data, scaled_image = _search_scale(
+        image, lambda candidate: _try_encode(candidate, fmt, target_bytes)
+    )
     return data, scaled_image, True
 
 
@@ -268,34 +268,17 @@ def _search_quality(image: Image.Image, fmt: str, target_bytes: int) -> bytes | 
     return best
 
 
-def _search_scale_lossy(
-    image: Image.Image, fmt: str, target_bytes: int
+def _search_scale(
+    image: Image.Image,
+    encode_fitting: Callable[[Image.Image], bytes | None],
 ) -> tuple[bytes, Image.Image]:
+    """Binary-search the widest width whose encoding fits the target."""
     best: tuple[bytes, Image.Image] | None = None
     low, high = 1, image.width
     while low <= high:
         mid = (low + high) // 2
         scaled = _resize_to_width(image, mid)
-        data = _search_quality(scaled, fmt, target_bytes)
-        if data is not None:
-            best = (data, scaled)
-            low = mid + 1
-        else:
-            high = mid - 1
-    if best is None:
-        raise ResizeError("error.cannot_shrink")
-    return best
-
-
-def _search_scale_lossless(
-    image: Image.Image, fmt: str, target_bytes: int
-) -> tuple[bytes, Image.Image]:
-    best: tuple[bytes, Image.Image] | None = None
-    low, high = 1, image.width
-    while low <= high:
-        mid = (low + high) // 2
-        scaled = _resize_to_width(image, mid)
-        data = _try_encode(scaled, fmt, target_bytes)
+        data = encode_fitting(scaled)
         if data is not None:
             best = (data, scaled)
             low = mid + 1
