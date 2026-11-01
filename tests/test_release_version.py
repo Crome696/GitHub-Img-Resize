@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -50,6 +51,29 @@ class ReleaseVersionTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         self.assertEqual(buffer.getvalue(), "v1.2.0\n")
+
+    def _pyproject(self, version: str) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "pyproject.toml"
+        path.write_text(
+            f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
+        )
+        return path
+
+    def test_check_passes_when_pyproject_matches_next_release(self) -> None:
+        path = self._pyproject("1.1.2")
+        code = release_version.main(
+            ["--labels", "", "--tags", "v1.1.1", "--check-pyproject", str(path)]
+        )
+        self.assertEqual(code, 0)
+
+    def test_check_fails_when_pyproject_is_stale(self) -> None:
+        path = self._pyproject("1.1.1")
+        code = release_version.main(
+            ["--labels", "minor", "--tags", "v1.1.1", "--check-pyproject", str(path)]
+        )
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

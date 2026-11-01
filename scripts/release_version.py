@@ -10,7 +10,9 @@ import argparse
 import re
 import subprocess
 import sys
+import tomllib
 from collections.abc import Iterable
+from pathlib import Path
 
 Version = tuple[int, int, int]
 
@@ -55,6 +57,11 @@ def format_tag(version: Version) -> str:
     return "v{}.{}.{}".format(*version)
 
 
+def pyproject_version(path: Path) -> str:
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
+
+
 def _git_tags() -> list[str]:
     completed = subprocess.run(
         ["git", "tag", "--list", "v*"],  # noqa: S607 - fixed git argv
@@ -78,13 +85,34 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Existing tags to consider; defaults to the tags in this repository.",
     )
+    parser.add_argument(
+        "--check-pyproject",
+        type=Path,
+        default=None,
+        help="Fail unless this pyproject.toml declares the expected version.",
+    )
     args = parser.parse_args(argv)
 
     tags = args.tags if args.tags is not None else _git_tags()
     labels = [label for label in args.labels.split(",") if label.strip()]
     current = latest_version(tags)
-    version = next_version(current, bump_kind(labels))
-    print(format_tag(version))
+    tag = format_tag(next_version(current, bump_kind(labels)))
+
+    if args.check_pyproject is None:
+        print(tag)
+        return 0
+
+    expected = tag.removeprefix("v")
+    declared = pyproject_version(args.check_pyproject)
+    if declared != expected:
+        print(
+            f"{args.check_pyproject} declares version {declared}, but the next "
+            f'release is {tag}. Set version = "{expected}" in pyproject.toml '
+            "(see AGENTS.md).",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"{args.check_pyproject} matches the next release {tag}.")
     return 0
 
 
